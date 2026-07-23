@@ -79,7 +79,7 @@ pub fn build(b: *std.Build) void {
 
     // 可执行文件（仅非 Android 平台）
     // 独立运行的播放器程序，用于桌面环境下的开发测试
-    if (target.result.os.tag != .android) {
+    if (!isAndroid(target)) {
         const exe = b.addExecutable(.{
             .name = "zmusic-player",
             .root_module = b.createModule(.{
@@ -168,6 +168,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(player_test).step);
 }
 
+/// 判断目标是否为 Android 平台
+///
+/// 在 Zig 0.16.0 中，Android 使用 .linux 作为操作系统标签，
+/// 通过 ABI 为 .android 来区分。
+fn isAndroid(target: std.Build.ResolvedTarget) bool {
+    return target.result.os.tag == .linux and target.result.abi == .android;
+}
+
 /// 创建 miniaudio 绑定模块。
 ///
 /// 通过 Zig 的 @cImport 机制自动翻译 C 头文件，生成可在 Zig 中直接调用的
@@ -254,7 +262,7 @@ fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
 ///   - m：数学库，音频处理中的数学运算
 ///   - dl：动态链接库，用于运行时加载音频驱动
 ///
-/// - Android：
+/// - Android（在 Zig 中表现为 .linux + .android ABI）：
 ///   - log：Android 日志库（__android_log_print）
 ///   - android：Android 原生应用支持库
 ///   - m：数学库
@@ -270,15 +278,21 @@ fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
 ///   - AudioToolbox：高级音频工具箱（编解码、格式转换等）
 ///   - CoreFoundation：基础框架，提供数据类型和运行时支持
 fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
-    switch (target.result.os.tag) {
+    const os_tag = target.result.os.tag;
+    const abi = target.result.abi;
+
+    // 先处理 Android（在 Zig 中表现为 linux + android ABI）
+    if (os_tag == .linux and abi == .android) {
+        mod.linkSystemLibrary("log", .{});
+        mod.linkSystemLibrary("android", .{});
+        mod.linkSystemLibrary("m", .{});
+        mod.linkSystemLibrary("dl", .{});
+        return;
+    }
+
+    switch (os_tag) {
         .linux => {
             mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("m", .{});
-            mod.linkSystemLibrary("dl", .{});
-        },
-        .android => {
-            mod.linkSystemLibrary("log", .{});
-            mod.linkSystemLibrary("android", .{});
             mod.linkSystemLibrary("m", .{});
             mod.linkSystemLibrary("dl", .{});
         },
