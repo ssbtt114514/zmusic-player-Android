@@ -278,9 +278,24 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
         .linux => {
             if (target.result.abi == .android) {
                 // Android: miniaudio 使用 OpenSLES 后端。
-                // 通过 --sysroot 传入 NDK sysroot 后，Zig 的 linkSystemLibrary
-                // 会自动在 sysroot 下查找系统库，无需手动拼接库路径，
-                // 避免路径重复拼接导致找不到 libOpenSLES.so / liblog.so。
+                // --sysroot 传入 NDK sysroot，但 Zig 不会自动查找 NDK 的
+                // arch-specific 库目录 (sysroot/usr/lib/<arch>/<api>/)，
+                // 需要显式添加库路径，否则找不到 libOpenSLES.so / liblog.so。
+                // 优先使用 CI 计算的 ANDROID_LIB_DIR 环境变量，
+                // 回退到从 sysroot 构造路径 (API level 34 = NDK r26d 默认)。
+                if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
+                    mod.addLibraryPath(.{ .cwd_relative = lib_dir });
+                } else if (b.sysroot) |sysroot| {
+                    const arch_name = switch (target.result.cpu.arch) {
+                        .aarch64 => "aarch64-linux-android",
+                        .x86_64 => "x86_64-linux-android",
+                        else => "",
+                    };
+                    if (arch_name.len > 0) {
+                        const lib_path = b.pathJoin(&.{ sysroot, "usr", "lib", arch_name, "34" });
+                        mod.addLibraryPath(.{ .cwd_relative = lib_path });
+                    }
+                }
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
             } else {
