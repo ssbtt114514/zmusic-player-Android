@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) void {
     // Android: 在 artifact 上直接添加库路径
     if (target.result.os.tag == .linux and target.result.abi == .android) {
         if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
+            // 使用 .path 字段创建 LazyPath
             shared_lib.addLibraryPath(.{ .path = lib_dir });
         }
     }
