@@ -285,6 +285,7 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
                 // 避免在 build.zig 里猜测 API 级别或重复拼接 sysroot 路径。
                 const android_lib_dir = b.graph.environ_map.get("ANDROID_LIB_DIR") orelse b.option([]const u8, "android-lib-dir", "Android NDK arch library dir");
                 if (android_lib_dir) |dir| {
+                    std.log.info("Adding Android library path: {s}", .{dir});
                     mod.addLibraryPath(.{ .cwd_relative = dir });
                 }
                 mod.linkSystemLibrary("OpenSLES", .{});
