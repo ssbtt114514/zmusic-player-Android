@@ -72,20 +72,20 @@ jobs:
           echo "NDK_SYSROOT=$SYSROOT" >> $GITHUB_ENV
           echo "Using NDK sysroot: $SYSROOT"
 
-   - name: Build
-  shell: bash
-  run: |
-    set -o pipefail
-    echo "ANDROID_LIB_DIR=$ANDROID_LIB_DIR"
-    ls -la "$ANDROID_LIB_DIR" || true
-    if [ -n "${{ matrix.android }}" ]; then
-      zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
-        --sysroot "$NDK_SYSROOT" \
-        --summary all 2>&1 | tee zig-build.log
-    else
-      zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
-        --summary all 2>&1 | tee zig-build.log
-    fi
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "ANDROID_LIB_DIR=$ANDROID_LIB_DIR"
+          ls -la "$ANDROID_LIB_DIR" || true
+          if [ -n "${{ matrix.android }}" ]; then
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
+              --sysroot "$NDK_SYSROOT" \
+              --summary all 2>&1 | tee zig-build.log
+          else
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
+              --summary all 2>&1 | tee zig-build.log
+          fi
 
       - name: Show build log
         if: always()
