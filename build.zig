@@ -169,7 +169,9 @@ fn createMiniaudioModule(
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
     const translate = b.addTranslateC(.{
-        .root_source_file = b.path("vendor/miniaudio/miniaudio.h"),
+        // 使用 wrapper.h 作为 translate-c 入口, 在 Android 下先禁用 _Nullable 宏,
+        // 避免 Zig translate-c 与 NDK 头文件的兼容性问题。
+        .root_source_file = b.path("src/wrapper.h"),
         .target = target,
         .optimize = optimize,
     });
