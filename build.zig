@@ -277,9 +277,20 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
     switch (target.result.os.tag) {
         .linux => {
             if (target.result.abi == .android) {
-                // ===== 修改：Android 不在 build.zig 中添加库路径 =====
-                // 库路径通过 GitHub Actions 命令行的 -L 参数传递
-                // 这样可以避免 Zig 自动拼接 --sysroot 导致路径重复
+                // Android: 使用全局库路径添加，避免与 sysroot 拼接重复
+                if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
+                    b.addLibraryPath(.{ .path = lib_dir });
+                } else if (b.sysroot) |sysroot| {
+                    const arch = switch (target.result.cpu.arch) {
+                        .aarch64 => "aarch64-linux-android",
+                        .x86_64 => "x86_64-linux-android",
+                        else => "",
+                    };
+                    if (arch.len > 0) {
+                        const lib_path = b.pathJoin(&.{ sysroot, "usr", "lib", arch, "34" });
+                        b.addLibraryPath(.{ .path = lib_path });
+                    }
+                }
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
             } else {
