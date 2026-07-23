@@ -283,19 +283,37 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
                 // 需要显式添加库路径，否则找不到 libOpenSLES.so / liblog.so。
                 // 优先使用 CI 计算的 ANDROID_LIB_DIR 环境变量，
                 // 回退到从 sysroot 构造路径 (API level 34 = NDK r26d 默认)。
-                if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
-                    mod.addLibraryPath(.{ .cwd_relative = lib_dir });
-                } else if (b.sysroot) |sysroot| {
-                    const arch_name = switch (target.result.cpu.arch) {
-                        .aarch64 => "aarch64-linux-android",
-                        .x86_64 => "x86_64-linux-android",
-                        else => "",
-                    };
-                    if (arch_name.len > 0) {
-                        const lib_path = b.pathJoin(&.{ sysroot, "usr", "lib", arch_name, "34" });
-                        mod.addLibraryPath(.{ .cwd_relative = lib_path });
+                
+                // ====== 修改开始 ======
+                // 方案1：直接使用环境变量 ANDROID_LIB_DIR
+                // 从环境变量获取库目录
+                const lib_dir = b.graph.environ_map.get("ANDROID_LIB_DIR") orelse blk: {
+                    // 如果环境变量不存在，从 sysroot 构造
+                    if (b.sysroot) |sysroot| {
+                        const arch_name = switch (target.result.cpu.arch) {
+                            .aarch64 => "aarch64-linux-android",
+                            .x86_64 => "x86_64-linux-android",
+                            else => "",
+                        };
+                        if (arch_name.len > 0) {
+                            const path = b.pathJoin(&.{ sysroot, "usr", "lib", arch_name, "34" });
+                            break :blk path;
+                        }
                     }
+                    break :blk null;
+                };
+                
+                // 如果成功获取到库目录，使用 addLibraryPath
+                if (lib_dir) |dir| {
+                    // 使用 cwd_relative 确保路径正确
+                    mod.addLibraryPath(.{ .cwd_relative = dir });
+                    
+                    // 调试输出：打印库路径（可选）
+                    // std.debug.print("Android library path: {s}\n", .{dir});
                 }
+                // ====== 修改结束 ======
+                
+                // 链接系统库
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
             } else {
