@@ -68,6 +68,14 @@ pub fn build(b: *std.Build) void {
     player_mod_for_lib.addImport("platform", platform_mod);
     player_mod_for_lib.addImport("lyrics_types", lyrics_types_mod);
     shared_lib.root_module.addImport("player", player_mod_for_lib);
+    
+    // Android: 在 artifact 上直接添加库路径
+    if (target.result.os.tag == .linux and target.result.abi == .android) {
+        if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
+            shared_lib.addLibraryPath(.{ .path = lib_dir });
+        }
+    }
+    
     b.installArtifact(shared_lib);
 
     // 可执行文件
@@ -85,6 +93,13 @@ pub fn build(b: *std.Build) void {
     // player.zig 使用 @import("lyrics_types")，exe 通过 main.zig 相对导入 player.zig，
     // 因此 exe 模块也需要 lyrics_types 命名导入
     exe.root_module.addImport("lyrics_types", lyrics_types_mod);
+    
+    // Android: 在 artifact 上直接添加库路径
+    if (target.result.os.tag == .linux and target.result.abi == .android) {
+        if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
+            exe.addLibraryPath(.{ .path = lib_dir });
+        }
+    }
 
     b.installArtifact(exe);
 
@@ -277,8 +292,8 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
     switch (target.result.os.tag) {
         .linux => {
             if (target.result.abi == .android) {
-                // Android: 不在这里添加库路径，完全依赖命令行 -L 参数
-                // 这样可以避免路径重复拼接的问题
+                // Android: 库路径在 artifact 上已经添加（在 build 函数中）
+                // 这里只链接系统库
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
             } else {
