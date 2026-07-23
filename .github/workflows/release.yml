@@ -79,14 +79,21 @@ jobs:
           echo "ANDROID_LIB_DIR=$ANDROID_LIB_DIR"
           ls -la "$ANDROID_LIB_DIR" || true
           if [ -n "${{ matrix.android }}" ]; then
-            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --sysroot "$NDK_SYSROOT" --summary all
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --sysroot "$NDK_SYSROOT" --summary all 2>&1 | tee zig-build.log
           else
-            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --summary all
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --summary all 2>&1 | tee zig-build.log
           fi
 
       - name: Test
         if: matrix.android != true
         run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zig-build-log-${{ matrix.target }}
+          path: zig-build.log
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
