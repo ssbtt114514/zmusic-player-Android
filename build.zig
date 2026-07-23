@@ -68,17 +68,15 @@ pub fn build(b: *std.Build) void {
     player_mod_for_lib.addImport("platform", platform_mod);
     player_mod_for_lib.addImport("lyrics_types", lyrics_types_mod);
     shared_lib.root_module.addImport("player", player_mod_for_lib);
-    
-    // Android: 在 Build 级别添加库搜索路径
+
+    // Android: 在共享库模块级别添加库搜索路径
     if (target.result.os.tag == .linux and target.result.abi == .android) {
         if (b.graph.environ_map.get("ANDROID_LIB_DIR")) |lib_dir| {
-            // 使用 b.path 创建 LazyPath，然后添加到构建系统
-            const lazy_path = b.path(lib_dir);
-            // 使用 addLibraryPath（Build 级别的方法）
-            b.addLibraryPath(lazy_path);
+            // Zig 0.16.0: addLibraryPath 已移到 Module/CompileStep 上，不再在 Build 上
+            shared_lib.root_module.addLibraryPath(b.path(lib_dir));
         }
     }
-    
+
     b.installArtifact(shared_lib);
 
     // 可执行文件
@@ -96,10 +94,6 @@ pub fn build(b: *std.Build) void {
     // player.zig 使用 @import("lyrics_types")，exe 通过 main.zig 相对导入 player.zig，
     // 因此 exe 模块也需要 lyrics_types 命名导入
     exe.root_module.addImport("lyrics_types", lyrics_types_mod);
-    
-    // Android: 在 Build 级别添加库搜索路径（已经添加过了，但为了保险再添加一次）
-    // 注意：Build 级别的 addLibraryPath 是全局的，所以只需要添加一次
-    // 但这里为了清晰，我们检查一下是否已经添加
 
     b.installArtifact(exe);
 
@@ -292,7 +286,7 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
     switch (target.result.os.tag) {
         .linux => {
             if (target.result.abi == .android) {
-                // Android: 库路径在 Build 级别已经添加（在 build 函数中）
+                // Android: 库路径在模块级别已经添加（在 build 函数中）
                 // 这里只链接系统库
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
