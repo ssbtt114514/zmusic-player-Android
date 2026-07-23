@@ -84,6 +84,10 @@ jobs:
             zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --summary all 2>&1 | tee zig-build.log
           fi
 
+      - name: Show build log
+        if: always()
+        run: cat zig-build.log
+
       - name: Test
         if: matrix.android != true
         run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
