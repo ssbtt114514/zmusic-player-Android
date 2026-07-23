@@ -194,10 +194,9 @@ fn createMiniaudioModule(
                 .x86_64 => "x86_64-linux-android",
                 else => null,
             };
-            // Zig 0.16.0: .cwd_relative 已改为 .absolute
-            translate.addSystemIncludePath(.{ .absolute = b.pathJoin(&.{ sysroot, "usr/include" }) });
+            translate.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
             if (arch_include) |arch| {
-                translate.addSystemIncludePath(.{ .absolute = b.pathJoin(&.{ sysroot, "usr/include", arch }) });
+                translate.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include", arch }) });
             }
         }
     }
@@ -312,10 +311,9 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
             };
 
             if (sdk) |path| {
-                // Zig 0.16.0: .cwd_relative 已改为 .absolute
-                mod.addFrameworkPath(.{ .absolute = b.pathJoin(&.{ path, "System/Library/Frameworks" }) });
-                mod.addSystemIncludePath(.{ .absolute = b.pathJoin(&.{ path, "usr/include" }) });
-                mod.addLibraryPath(.{ .absolute = b.pathJoin(&.{ path, "usr/lib" }) });
+                mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ path, "System/Library/Frameworks" }) });
+                mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ path, "usr/include" }) });
+                mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ path, "usr/lib" }) });
                 // Zig 交叉编译 macOS 时 -lc 链接的是 Zig 自带 libc，不含 iconv。
                 // 需要显式链接系统的 libiconv（SDK 的 usr/lib/libiconv.tbd）。
                 mod.linkSystemLibrary("iconv", .{});
