@@ -281,17 +281,11 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
                 // Zig 不会自动从 --sysroot 推断库路径，需要显式添加 NDK 的
                 // 架构相关库目录（含 API 级别子目录），否则 linkSystemLibrary
                 // 找不到 libOpenSLES.so / liblog.so。
-                if (b.sysroot) |sysroot| {
-                    const arch_lib_dir = switch (target.result.cpu.arch) {
-                        .aarch64 => "aarch64-linux-android",
-                        .x86_64 => "x86_64-linux-android",
-                        else => null,
-                    };
-                    if (arch_lib_dir) |arch| {
-                        mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch }) });
-                        mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch, "21" }) });
-                    }
-                    mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
+                // CI 通过 ANDROID_LIB_DIR 环境变量传入实际存在的 API 级别库目录，
+                // 避免在 build.zig 里猜测 API 级别或重复拼接 sysroot 路径。
+                const android_lib_dir = b.graph.environ_map.get("ANDROID_LIB_DIR") orelse b.option([]const u8, "android-lib-dir", "Android NDK arch library dir");
+                if (android_lib_dir) |dir| {
+                    mod.addLibraryPath(.{ .cwd_relative = dir });
                 }
                 mod.linkSystemLibrary("OpenSLES", .{});
                 mod.linkSystemLibrary("log", .{});
