@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -41,11 +42,23 @@ jobs:
       - name: Setup Android NDK
         if: matrix.android == true
         run: |
-          SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          # ubuntu-latest 预装了 Android NDK, 路径在 $ANDROID_NDK_LATEST_HOME
+          NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          if [ -z "$NDK_HOME" ]; then
+            echo "::error::Android NDK not found"
+            exit 1
+          fi
+          SYSROOT="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           echo "NDK_SYSROOT=$SYSROOT" >> $GITHUB_ENV
+          echo "Using NDK sysroot: $SYSROOT"
 
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall ${{ matrix.android == true && '--sysroot $NDK_SYSROOT' || '' }}
+        run: |
+          if [ -n "${{ matrix.android }}" ]; then
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --sysroot "$NDK_SYSROOT"
+          else
+            zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+          fi
 
       - name: Test
         if: matrix.android != true
