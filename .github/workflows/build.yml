@@ -42,13 +42,18 @@ jobs:
       - name: Setup Android NDK
         if: matrix.android == true
         run: |
-          # ubuntu-latest 预装了 Android NDK, 路径在 $ANDROID_NDK_LATEST_HOME
-          NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          if [ -z "$NDK_HOME" ]; then
-            echo "::error::Android NDK not found"
-            exit 1
+          # 使用 NDK r26d 避免 Zig translate-c 与 NDK 29 的 _Nullable 语法冲突
+          NDK_VERSION=r26d
+          NDK_ZIP="android-ndk-${NDK_VERSION}-linux.zip"
+          if [ ! -d "$HOME/android-ndk-${NDK_VERSION}" ]; then
+            wget -q "https://dl.google.com/android/repository/${NDK_ZIP}"
+            unzip -q "${NDK_ZIP}" -d "$HOME"
+            rm -f "${NDK_ZIP}"
           fi
+          NDK_HOME="$HOME/android-ndk-${NDK_VERSION}"
           SYSROOT="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          echo "ANDROID_NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
           echo "NDK_SYSROOT=$SYSROOT" >> $GITHUB_ENV
           echo "Using NDK sysroot: $SYSROOT"
 
