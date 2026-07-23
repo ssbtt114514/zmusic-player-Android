@@ -17,6 +17,9 @@ jobs:
             target: x86_64-linux
           - os: ubuntu-24.04-arm
             target: aarch64-linux
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            android: true
           - os: windows-latest
             target: x86_64-windows-gnu
           - os: macos-latest
@@ -37,10 +40,17 @@ jobs:
         if: runner.os == 'macOS'
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
+      - name: Setup Android NDK
+        if: matrix.android == true
+        run: |
+          SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          echo "NDK_SYSROOT=$SYSROOT" >> $GITHUB_ENV
+
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall ${{ matrix.android == true && '--sysroot $NDK_SYSROOT' || '' }}
 
       - name: Test
+        if: matrix.android != true
         run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
 
       - name: Upload artifacts

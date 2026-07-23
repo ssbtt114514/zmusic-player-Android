@@ -257,9 +257,15 @@ fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
 fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
     switch (target.result.os.tag) {
         .linux => {
-            mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("m", .{});
-            mod.linkSystemLibrary("dl", .{});
+            if (target.result.abi == .android) {
+                // Android: miniaudio 使用 OpenSLES 后端
+                mod.linkSystemLibrary("OpenSLES", .{});
+                mod.linkSystemLibrary("log", .{});
+            } else {
+                mod.linkSystemLibrary("pthread", .{});
+                mod.linkSystemLibrary("m", .{});
+                mod.linkSystemLibrary("dl", .{});
+            }
         },
         .windows => {
             mod.linkSystemLibrary("winmm", .{});
