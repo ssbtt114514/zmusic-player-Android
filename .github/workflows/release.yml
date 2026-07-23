@@ -75,6 +75,7 @@ jobs:
           echo "Using NDK sysroot: $SYSROOT"
 
       - name: Build
+        shell: bash
         run: |
           echo "ANDROID_LIB_DIR=$ANDROID_LIB_DIR"
           ls -la "$ANDROID_LIB_DIR" || true
@@ -86,6 +87,7 @@ jobs:
 
       - name: Show build log
         if: always()
+        shell: bash
         run: cat zig-build.log
 
       - name: Test
