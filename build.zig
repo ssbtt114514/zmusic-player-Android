@@ -173,6 +173,23 @@ fn createMiniaudioModule(
         .target = target,
         .optimize = optimize,
     });
+
+    // Android 交叉编译时, translate-c 子进程不继承 --sysroot,
+    // 需要显式添加 NDK sysroot 的 include 路径, 否则找不到 pthread.h 等系统头文件
+    if (target.result.os.tag == .linux and target.result.abi == .android) {
+        if (b.sysroot) |sysroot| {
+            const arch_include = switch (target.result.cpu.arch) {
+                .aarch64 => "aarch64-linux-android",
+                .x86_64 => "x86_64-linux-android",
+                else => null,
+            };
+            translate.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
+            if (arch_include) |arch| {
+                translate.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include", arch }) });
+            }
+        }
+    }
+
     return translate.createModule();
 }
 
