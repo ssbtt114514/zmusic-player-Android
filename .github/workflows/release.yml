@@ -83,7 +83,6 @@ jobs:
           if [ -n "${{ matrix.android }}" ]; then
             zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
               --sysroot "$NDK_SYSROOT" \
-              -L "$ANDROID_LIB_DIR" \
               --summary all 2>&1 | tee zig-build.log
           else
             zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall \
