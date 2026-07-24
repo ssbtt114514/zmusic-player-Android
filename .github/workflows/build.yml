@@ -38,10 +38,10 @@ jobs:
           rm -rf .zig-cache .zig-cache-tmp ~/.cache/zig || true
 
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall -fno-cache
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
 
       - name: Test
-        run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall -fno-cache
+        run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -76,8 +76,7 @@ jobs:
           zig build android \
             -Dtarget=aarch64-linux-android \
             -Doptimize=ReleaseSmall \
-            --sysroot $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
-            -fno-cache
+            --sysroot $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
