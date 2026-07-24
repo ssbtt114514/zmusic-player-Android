@@ -1,4 +1,4 @@
-name: Build
+name: Build Android
 
 on:
   push:
@@ -7,50 +7,6 @@ on:
     branches: [dev]
 
 jobs:
-  build-desktop:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-linux
-          - os: windows-latest
-            target: x86_64-windows-gnu
-          - os: macos-latest
-            target: aarch64-macos
-          - os: macos-15
-            target: x86_64-macos
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-
-      - uses: jdx/mise-action@v4
-
-      - name: Configure Xcode
-        if: runner.os == 'macOS'
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-      - name: Clean cache
-        run: |
-          rm -rf .zig-cache .zig-cache-tmp ~/.cache/zig || true
-
-      - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
-
-      - name: Test
-        run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: zmusic-${{ matrix.target }}
-          path: |
-            zig-out/bin/
-            zig-out/lib/
-
   build-android:
     runs-on: ubuntu-latest
 
@@ -69,7 +25,7 @@ jobs:
 
       - name: Clean cache
         run: |
-          rm -rf .zig-cache .zig-cache-tmp ~/.cache/zig || true
+          rm -rf .zig-cache .zig-cache-tmp || true
 
       - name: Build Android JNI Library
         run: |
@@ -84,18 +40,3 @@ jobs:
           name: zmusic-android-arm64-v8a
           path: |
             zig-out/lib/
-
-  summary:
-    needs: [build-desktop, build-android]
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-      - name: Check build status
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Desktop (Linux, Windows, macOS) | ${{ needs.build-desktop.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "| Android (ARM64) | ${{ needs.build-android.result }}" >> $GITHUB_STEP_SUMMARY
