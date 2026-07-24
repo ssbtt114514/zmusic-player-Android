@@ -138,7 +138,7 @@ fn configureModule(
 ) void {
     mod.addImport("miniaudio", miniaudio_mod);
     mod.addImport("platform", platform_mod);
-    addMiniaudioCSources(b, mod);
+    addMiniaudioCSources(b, mod, target);
     linkPlatformLibs(b, mod, target);
 }
 
@@ -146,9 +146,13 @@ fn configureModule(
 ///
 /// miniaudio 是纯 C 库，虽然通过 @cImport 翻译了头文件获得了类型定义和函数声明，
 /// 但实际的实现代码（miniaudio.c）仍需作为 C 源文件参与编译和链接。
-fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
+fn addMiniaudioCSources(
+    b: *std.Build, 
+    mod: *std.Build.Module, 
+    target: std.Build.ResolvedTarget
+) void {
     // 为 Android 平台添加宏定义
-    const flags = if (isAndroid(mod.target)) &[_][]const u8{
+    const flags = if (isAndroid(target)) &[_][]const u8{
         "-D_Nonnull=",
         "-D_Nullable=",
         "-D_Null_unspecified=",
@@ -170,7 +174,12 @@ fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
 ///   - android：Android 原生应用支持库
 ///   - m：数学库
 ///   - dl：动态链接库
-fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
+fn linkPlatformLibs(
+    b: *std.Build, 
+    mod: *std.Build.Module, 
+    target: std.Build.ResolvedTarget
+) void {
+    _ = b;
     const os_tag = target.result.os.tag;
     const abi = target.result.abi;
 
@@ -180,9 +189,5 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
         mod.linkSystemLibrary("android", .{});
         mod.linkSystemLibrary("m", .{});
         mod.linkSystemLibrary("dl", .{});
-        return;
     }
-
-    // 对其他平台不做处理（因为已删除桌面构建）
-    _ = b;
 }
