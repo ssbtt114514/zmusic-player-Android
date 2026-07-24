@@ -33,11 +33,15 @@ jobs:
         if: runner.os == 'macOS'
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
+      - name: Clean cache
+        run: |
+          rm -rf .zig-cache .zig-cache-tmp ~/.cache/zig || true
+
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall -fno-cache
 
       - name: Test
-        run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+        run: zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall -fno-cache
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -63,12 +67,17 @@ jobs:
           ndk-version: r27c
           add-to-path: false
 
+      - name: Clean cache
+        run: |
+          rm -rf .zig-cache .zig-cache-tmp ~/.cache/zig || true
+
       - name: Build Android JNI Library
         run: |
           zig build android \
             -Dtarget=aarch64-linux-android \
             -Doptimize=ReleaseSmall \
-            --sysroot $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+            --sysroot $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+            -fno-cache
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
