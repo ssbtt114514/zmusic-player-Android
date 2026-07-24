@@ -141,12 +141,30 @@ fn linkPlatformLibs(
     mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
 ) void {
-    _ = b;
     const os_tag = target.result.os.tag;
     const abi = target.result.abi;
 
-    // Android
+    // Android（在 Zig 中表现为 linux + android ABI）
     if (os_tag == .linux and abi == .android) {
+        // 添加 NDK 库搜索路径
+        if (b.sysroot) |sysroot| {
+            // 添加通用的库路径
+            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
+            
+            // 添加架构特定的库路径
+            const arch_name = switch (target.result.cpu.arch) {
+                .aarch64 => "aarch64-linux-android",
+                .arm => "arm-linux-androideabi",
+                .x86_64 => "x86_64-linux-android",
+                .x86 => "i686-linux-android",
+                else => "aarch64-linux-android",
+            };
+            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch_name }) });
+            
+            // 添加 API 级别的库路径（Android 24）
+            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch_name, "24" }) });
+        }
+
         mod.linkSystemLibrary("log", .{});
         mod.linkSystemLibrary("android", .{});
         mod.linkSystemLibrary("m", .{});
