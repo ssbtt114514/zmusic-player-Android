@@ -5,24 +5,20 @@
 
 const std = @import("std");
 
-/// 项目构建入口。
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const miniaudio_mod = createMiniaudioModule(b, target, optimize);
 
-    // 平台工具模块
     const platform_mod = b.createModule(.{
         .root_source_file = b.path("src/platform.zig"),
     });
 
-    // 歌词类型模块
     const lyrics_types_mod = b.createModule(.{
         .root_source_file = b.path("src/lyrics/types.zig"),
     });
 
-    // 共享库（JNI 桥接）
     const shared_lib = b.addLibrary(.{
         .linkage = .dynamic,
         .name = "zmusic",
@@ -33,14 +29,14 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    configureModule(b, shared_lib.root_module, target, miniaudio_mod, platform_mod);
 
-    // callback 模块
+    shared_lib.root_module.addImport("miniaudio", miniaudio_mod);
+    shared_lib.root_module.addImport("platform", platform_mod);
+    
     shared_lib.root_module.addImport("callback", b.createModule(.{
         .root_source_file = b.path("src/jni/callback.zig"),
     }));
 
-    // Player 模块
     const player_mod_for_lib = b.createModule(.{
         .root_source_file = b.path("src/player.zig"),
     });
@@ -49,39 +45,48 @@ pub fn build(b: *std.Build) void {
     player_mod_for_lib.addImport("lyrics_types", lyrics_types_mod);
     shared_lib.root_module.addImport("player", player_mod_for_lib);
 
+    // 添加 C 源文件
+    shared_lib.root_module.addCSourceFile(.{
+        .file = b.path("vendor/miniaudio/miniaudio.c"),
+        .flags = &.{},
+    });
+    shared_lib.root_module.addIncludePath(b.path("vendor/miniaudio"));
+
+    // 链接 Android 库
+    if (target.result.os.tag == .linux and target.result.abi == .android) {
+        shared_lib.root_module.linkSystemLibrary("log", .{});
+        shared_lib.root_module.linkSystemLibrary("android", .{});
+        shared_lib.root_module.linkSystemLibrary("m", .{});
+        shared_lib.root_module.linkSystemLibrary("dl", .{});
+    }
+
     b.installArtifact(shared_lib);
 
-    // Android 构建步骤
-    const android_step = b.step(
-        "android",
-        "Build Android JNI Library",
-    );
+    const android_step = b.step("android", "Build Android JNI Library");
     android_step.dependOn(&shared_lib.step);
 }
 
-/// 判断目标是否为 Android 平台
-fn isAndroid(target: std.Build.ResolvedTarget) bool {
-    return target.result.os.tag == .linux and target.result.abi == .android;
-}
-
-/// 创建 miniaudio 绑定模块。
 fn createMiniaudioModule(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
-    // Android 平台：使用 wrapper 头文件
-    if (isAndroid(target)) {
-        const translate = b.addTranslateC(.{
-            .root_source_file = b.path("miniaudio_wrapper.h"),
-            .target = target,
-            .optimize = optimize,
-        });
+    const is_android = target.result.os.tag == .linux and target.result.abi == .android;
+    
+    // Android 使用 wrapper，其他平台直接使用 miniaudio.h
+    const header_file = if (is_android) 
+        b.path("miniaudio_wrapper.h") 
+    else 
+        b.path("vendor/miniaudio/miniaudio.h");
 
-        // 添加必要的 include 路径
+    const translate = b.addTranslateC(.{
+        .root_source_file = header_file,
+        .target = target,
+        .optimize = optimize,
+    });
+
+    if (is_android) {
         translate.addIncludePath(b.path("vendor/miniaudio"));
-
-        // 添加 NDK sysroot 路径
         if (b.sysroot) |sysroot| {
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
             const arch_name = switch (target.result.cpu.arch) {
@@ -93,81 +98,7 @@ fn createMiniaudioModule(
             };
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include", arch_name }) });
         }
-
-        return translate.createModule();
     }
-
-    // 非 Android 平台：直接翻译头文件
-    const translate = b.addTranslateC(.{
-        .root_source_file = b.path("vendor/miniaudio/miniaudio.h"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     return translate.createModule();
-}
-
-/// 为构建模块应用通用配置。
-fn configureModule(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-    miniaudio_mod: *std.Build.Module,
-    platform_mod: *std.Build.Module,
-) void {
-    mod.addImport("miniaudio", miniaudio_mod);
-    mod.addImport("platform", platform_mod);
-    addMiniaudioCSources(b, mod, target);
-    linkPlatformLibs(b, mod, target);
-}
-
-/// 添加 miniaudio 的 C 源文件。
-fn addMiniaudioCSources(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-) void {
-    _ = target;
-    mod.addCSourceFile(.{
-        .file = b.path("vendor/miniaudio/miniaudio.c"),
-        .flags = &.{},
-    });
-    mod.addIncludePath(b.path("vendor/miniaudio"));
-}
-
-/// 链接各平台所需的系统库。
-fn linkPlatformLibs(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-) void {
-    const os_tag = target.result.os.tag;
-    const abi = target.result.abi;
-
-    // Android（在 Zig 中表现为 linux + android ABI）
-    if (os_tag == .linux and abi == .android) {
-        // 添加 NDK 库搜索路径
-        if (b.sysroot) |sysroot| {
-            // 添加通用的库路径
-            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
-            
-            // 添加架构特定的库路径
-            const arch_name = switch (target.result.cpu.arch) {
-                .aarch64 => "aarch64-linux-android",
-                .arm => "arm-linux-androideabi",
-                .x86_64 => "x86_64-linux-android",
-                .x86 => "i686-linux-android",
-                else => "aarch64-linux-android",
-            };
-            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch_name }) });
-            
-            // 添加 API 级别的库路径（Android 24）
-            mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", arch_name, "24" }) });
-        }
-
-        mod.linkSystemLibrary("log", .{});
-        mod.linkSystemLibrary("android", .{});
-        mod.linkSystemLibrary("m", .{});
-        mod.linkSystemLibrary("dl", .{});
-    }
 }
