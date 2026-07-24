@@ -64,12 +64,11 @@ jobs:
           add-to-path: false
 
       - name: Build Android JNI Library
-        env:
-          ZIG_SYSROOT: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot
         run: |
           zig build android \
             -Dtarget=aarch64-linux-android \
-            -Doptimize=ReleaseSmall
+            -Doptimize=ReleaseSmall \
+            --sysroot $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
