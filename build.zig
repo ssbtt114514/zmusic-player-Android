@@ -1,7 +1,4 @@
 //! Zig 构建系统配置文件
-//!
-//! 定义项目的构建流程，包括：
-//! - 共享库（JNI 桥接）：编译为动态链接库供 Java 层通过 JNI 加载
 
 const std = @import("std");
 
@@ -52,8 +49,16 @@ pub fn build(b: *std.Build) void {
     });
     shared_lib.root_module.addIncludePath(b.path("vendor/miniaudio"));
 
-    // 链接 Android 库
+    // Android 特定配置
     if (target.result.os.tag == .linux and target.result.abi == .android) {
+        // 使用 addSystemLibraryPath 添加库搜索路径
+        if (b.sysroot) |sysroot| {
+            // 方法1：使用 addSystemLibraryPath
+            shared_lib.root_module.addSystemLibraryPath(.{ 
+                .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib", "aarch64-linux-android", "24" }) 
+            });
+        }
+        
         shared_lib.root_module.linkSystemLibrary("log", .{});
         shared_lib.root_module.linkSystemLibrary("android", .{});
         shared_lib.root_module.linkSystemLibrary("m", .{});
@@ -73,7 +78,6 @@ fn createMiniaudioModule(
 ) *std.Build.Module {
     const is_android = target.result.os.tag == .linux and target.result.abi == .android;
     
-    // Android 使用 wrapper，其他平台直接使用 miniaudio.h
     const header_file = if (is_android) 
         b.path("miniaudio_wrapper.h") 
     else 
