@@ -24,6 +24,8 @@ jobs:
           add-to-path: false
 
       - name: Build Android JNI Library
+        env:
+          LIBRARY_PATH: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24
         run: |
           zig build android \
             -Dtarget=aarch64-linux-android \
