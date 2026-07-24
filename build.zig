@@ -2,12 +2,6 @@
 //!
 //! 定义项目的构建流程，包括：
 //! - 共享库（JNI 桥接）：编译为动态链接库供 Java 层通过 JNI 加载
-//! - 可执行文件：独立运行的播放器程序（用于桌面测试）
-//! - 测试：各模块的单元测试
-//!
-//! 构建依赖：
-//! - miniaudio：跨平台音频引擎（C 库，通过 @cImport 引入）
-//! - 平台特定的系统库（见 linkPlatformLibs）
 
 const std = @import("std");
 
@@ -17,9 +11,6 @@ const std = @import("std");
 /// 1. 解析目标平台和优化选项
 /// 2. 创建 miniaudio 模块（C 头文件翻译）
 /// 3. 构建共享库（JNI 桥接）
-/// 4. 构建可执行文件（仅非 Android 平台）
-/// 5. 配置运行步骤（仅非 Android 平台）
-/// 6. 配置测试步骤
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -31,13 +22,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/platform.zig"),
     });
 
-    // 歌词类型模块（共享库和测试共享）
+    // 歌词类型模块
     const lyrics_types_mod = b.createModule(.{
         .root_source_file = b.path("src/lyrics/types.zig"),
     });
 
     // 共享库（JNI 桥接）
-    // 编译为动态链接库（libzmusic.so / zmusic.dll），供 Java 层通过 System.loadLibrary 加载
+    // 编译为动态链接库 libzmusic.so，供 Java 层通过 System.loadLibrary 加载
     const shared_lib = b.addLibrary(.{
         .linkage = .dynamic,
         .name = "zmusic",
@@ -49,18 +40,13 @@ pub fn build(b: *std.Build) void {
         }),
     });
     configureModule(b, shared_lib.root_module, target, miniaudio_mod, platform_mod);
+    
     // callback 模块作为独立 import，供 bridge.zig 导入事件回调机制
     shared_lib.root_module.addImport("callback", b.createModule(.{
         .root_source_file = b.path("src/jni/callback.zig"),
     }));
+    
     // Player 模块（bridge.zig 通过 @import("player") 引入）
-    //
-    // 由于共享库根模块路径为 src/jni/，无法通过 ../player.zig 相对导入，
-    // 因此将 player.zig 作为独立命名模块引入，并配置其依赖的命名导入。
-    //
-    // player.zig 已修改为通过 @import("lyrics_types") 命名导入获取歌词类型定义，
-    // 而非相对导入 lyrics/types.zig，避免 types.zig 同时属于 player 模块和
-    // lyrics_types 模块（Zig 不允许同一文件属于多个模块）。
     const player_mod_for_lib = b.createModule(.{
         .root_source_file = b.path("src/player.zig"),
     });
@@ -68,104 +54,15 @@ pub fn build(b: *std.Build) void {
     player_mod_for_lib.addImport("platform", platform_mod);
     player_mod_for_lib.addImport("lyrics_types", lyrics_types_mod);
     shared_lib.root_module.addImport("player", player_mod_for_lib);
+    
     b.installArtifact(shared_lib);
 
-    // Android 构建步骤（仅构建共享库）
+    // Android 构建步骤
     const android_step = b.step(
         "android",
         "Build Android JNI Library",
     );
     android_step.dependOn(&shared_lib.step);
-
-    // 可执行文件（仅非 Android 平台）
-    // 独立运行的播放器程序，用于桌面环境下的开发测试
-    if (!isAndroid(target)) {
-        const exe = b.addExecutable(.{
-            .name = "zmusic-player",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }),
-        });
-        configureModule(b, exe.root_module, target, miniaudio_mod, platform_mod);
-        // player.zig 使用 @import("lyrics_types")，exe 通过 main.zig 相对导入 player.zig，
-        // 因此 exe 模块也需要 lyrics_types 命名导入
-        exe.root_module.addImport("lyrics_types", lyrics_types_mod);
-
-        b.installArtifact(exe);
-
-        // 运行
-        const run_cmd = b.addRunArtifact(exe);
-        run_cmd.step.dependOn(b.getInstallStep());
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
-        const run_step = b.step("run", "运行应用");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    // 测试
-    const test_step = b.step("test", "运行单元测试");
-
-    // 主模块单元测试
-    const main_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    configureModule(b, main_tests.root_module, target, miniaudio_mod, platform_mod);
-    main_tests.root_module.addImport("lyrics_types", lyrics_types_mod);
-    test_step.dependOn(&b.addRunArtifact(main_tests).step);
-
-    // 歌词模块（应用和测试共享）
-    // 歌词解析器模块
-    // 解析器依赖类型定义模块（lyrics_types_mod 已在共享库部分创建）
-    const lyrics_parser_mod = b.createModule(.{
-        .root_source_file = b.path("src/lyrics/parser.zig"),
-    });
-    // 解析器依赖类型定义模块
-    lyrics_parser_mod.addImport("lyrics_types", lyrics_types_mod);
-
-    addModuleTest(b, test_step, target, optimize, miniaudio_mod, platform_mod, "tests/test_lyrics.zig", &.{
-        .{ "lyrics_parser", lyrics_parser_mod },
-        .{ "lyrics", lyrics_types_mod },
-    });
-
-    const queue_mod = b.createModule(.{
-        .root_source_file = b.path("src/queue/playlist.zig"),
-    });
-    queue_mod.addImport("platform", platform_mod);
-    addModuleTest(b, test_step, target, optimize, miniaudio_mod, platform_mod, "tests/test_queue.zig", &.{
-        .{ "queue", queue_mod },
-    });
-
-    // Player 模块（需要 miniaudio C 源文件，因为 player.zig 的 deinit/stop 引用了 miniaudio 符号）
-    const player_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/player.zig"),
-    });
-    player_test_mod.addImport("miniaudio", miniaudio_mod);
-    player_test_mod.addImport("platform", platform_mod);
-    player_test_mod.addImport("lyrics_types", lyrics_types_mod);
-
-    const player_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/test_player.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    player_test.root_module.addImport("miniaudio", miniaudio_mod);
-    player_test.root_module.addImport("platform", platform_mod);
-    player_test.root_module.addImport("player", player_test_mod);
-    addMiniaudioCSources(b, player_test.root_module);
-    linkPlatformLibs(b, player_test.root_module, target);
-    test_step.dependOn(&b.addRunArtifact(player_test).step);
 }
 
 /// 判断目标是否为 Android 平台
@@ -185,6 +82,17 @@ fn createMiniaudioModule(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
+    // 为 Android 平台创建预定义头文件
+    const predef_include = if (target.result.os.tag == .linux and target.result.abi == .android) blk: {
+        const content =
+            \\#define _Nonnull
+            \\#define _Nullable
+            \\#define _Null_unspecified
+        ;
+        const file = b.addWriteFile("android_predef.h", content);
+        break :blk file.getDirectory();
+    } else null;
+
     const translate = b.addTranslateC(.{
         .root_source_file = b.path("vendor/miniaudio/miniaudio.h"),
         .target = target,
@@ -193,6 +101,11 @@ fn createMiniaudioModule(
 
     // 为 Android 平台特殊处理
     if (target.result.os.tag == .linux and target.result.abi == .android) {
+        // 添加预定义头文件目录
+        if (predef_include) |dir| {
+            translate.addIncludePath(dir);
+        }
+
         // 从 sysroot 添加标准 C 库头文件路径
         if (b.sysroot) |sysroot| {
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
@@ -207,11 +120,6 @@ fn createMiniaudioModule(
             };
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include", arch_name }) });
         }
-
-        // 定义宏来禁用 nullability 属性（解决 NDK 头文件与 Zig 的兼容性问题）
-        translate.addDefine("_Nonnull", "");
-        translate.addDefine("_Nullable", "");
-        translate.addDefine("_Null_unspecified", "");
     }
 
     return translate.createModule();
@@ -219,7 +127,7 @@ fn createMiniaudioModule(
 
 /// 为构建模块应用通用配置。
 ///
-/// 所有需要音频能力的模块（共享库、可执行文件、测试）都通过此函数统一配置，
+/// 所有需要音频能力的模块都通过此函数统一配置，
 /// 确保 miniaudio 导入、C 源文件和平台链接库的一致性。
 fn configureModule(
     b: *std.Build,
@@ -234,45 +142,21 @@ fn configureModule(
     linkPlatformLibs(b, mod, target);
 }
 
-/// 创建并注册模块级测试。
-///
-/// 封装测试创建的通用逻辑：创建测试可执行文件、添加依赖模块、
-/// 链接平台库，最后挂载到总测试步骤下。
-fn addModuleTest(
-    b: *std.Build,
-    test_step: *std.Build.Step,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    miniaudio_mod: *std.Build.Module,
-    platform_mod: *std.Build.Module,
-    test_path: []const u8,
-    imports: []const struct { []const u8, *std.Build.Module },
-) void {
-    const t = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path(test_path),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    t.root_module.addImport("miniaudio", miniaudio_mod);
-    t.root_module.addImport("platform", platform_mod);
-    for (imports) |imp| {
-        t.root_module.addImport(imp[0], imp[1]);
-    }
-    linkPlatformLibs(b, t.root_module, target);
-    test_step.dependOn(&b.addRunArtifact(t).step);
-}
-
 /// 添加 miniaudio 的 C 源文件。
 ///
 /// miniaudio 是纯 C 库，虽然通过 @cImport 翻译了头文件获得了类型定义和函数声明，
 /// 但实际的实现代码（miniaudio.c）仍需作为 C 源文件参与编译和链接。
 fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
+    // 为 Android 平台添加宏定义
+    const flags = if (isAndroid(mod.target)) &[_][]const u8{
+        "-D_Nonnull=",
+        "-D_Nullable=",
+        "-D_Null_unspecified=",
+    } else &.{};
+
     mod.addCSourceFile(.{
         .file = b.path("vendor/miniaudio/miniaudio.c"),
-        .flags = &.{},
+        .flags = flags,
     });
     mod.addIncludePath(b.path("vendor/miniaudio"));
 }
@@ -281,31 +165,16 @@ fn addMiniaudioCSources(b: *std.Build, mod: *std.Build.Module) void {
 ///
 /// miniaudio 在不同操作系统上依赖不同的底层音频 API，需要链接对应的系统库：
 ///
-/// - Linux：
-///   - pthread：POSIX 线程库，用于异步音频回调
-///   - m：数学库，音频处理中的数学运算
-///   - dl：动态链接库，用于运行时加载音频驱动
-///
-/// - Android（在 Zig 中表现为 .linux + .android ABI）：
+/// - Android：
 ///   - log：Android 日志库（__android_log_print）
 ///   - android：Android 原生应用支持库
 ///   - m：数学库
 ///   - dl：动态链接库
-///
-/// - Windows：
-///   - winmm：Windows 多媒体 API
-///   - ole32：COM 基础库，部分音频接口依赖 COM
-///   - uuid：UUID 生成，COM 组件标识
-///
-/// - macOS：
-///   - CoreAudio：核心音频服务
-///   - AudioToolbox：高级音频工具箱（编解码、格式转换等）
-///   - CoreFoundation：基础框架，提供数据类型和运行时支持
 fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
     const os_tag = target.result.os.tag;
     const abi = target.result.abi;
 
-    // 先处理 Android（在 Zig 中表现为 linux + android ABI）
+    // Android（在 Zig 中表现为 linux + android ABI）
     if (os_tag == .linux and abi == .android) {
         mod.linkSystemLibrary("log", .{});
         mod.linkSystemLibrary("android", .{});
@@ -314,38 +183,6 @@ fn linkPlatformLibs(b: *std.Build, mod: *std.Build.Module, target: std.Build.Res
         return;
     }
 
-    switch (os_tag) {
-        .linux => {
-            mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("m", .{});
-            mod.linkSystemLibrary("dl", .{});
-        },
-        .windows => {
-            mod.linkSystemLibrary("winmm", .{});
-            mod.linkSystemLibrary("ole32", .{});
-            mod.linkSystemLibrary("uuid", .{});
-        },
-        .macos => {
-            // macOS SDK 路径获取（优先级从高到低）：
-            // 1. getSdk：macOS 主机自动检测
-            // 2. SDKROOT 环境变量：交叉编译时手动指定
-            // 3. --sysroot 构建参数
-            const sdk = sdk_blk: {
-                break :sdk_blk std.zig.system.darwin.getSdk(b.allocator, b.graph.io, &target.result) orelse b.graph.environ_map.get("SDKROOT") orelse b.sysroot;
-            };
-
-            if (sdk) |path| {
-                mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ path, "System/Library/Frameworks" }) });
-                mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ path, "usr/include" }) });
-                mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ path, "usr/lib" }) });
-                // Zig 交叉编译 macOS 时 -lc 链接的是 Zig 自带 libc，不含 iconv。
-                // 需要显式链接系统的 libiconv（SDK 的 usr/lib/libiconv.tbd）。
-                mod.linkSystemLibrary("iconv", .{});
-                mod.linkFramework("CoreAudio", .{});
-                mod.linkFramework("AudioToolbox", .{});
-                mod.linkFramework("CoreFoundation", .{});
-            }
-        },
-        else => {},
-    }
+    // 对其他平台不做处理（因为已删除桌面构建）
+    _ = b;
 }
