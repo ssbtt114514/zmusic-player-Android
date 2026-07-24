@@ -32,6 +32,7 @@ const atomic = std.atomic;
 const callback = @import("callback");
 const jni = @import("jni_types.zig");
 const player_mod = @import("player");
+const log = @import("android_log");
 
 const Player = player_mod.Player;
 const PlaybackState = player_mod.PlaybackState;
@@ -40,6 +41,85 @@ const Track = player_mod.Track;
 const RepeatMode = player_mod.RepeatMode;
 
 const allocator = std.heap.c_allocator;
+
+// ============================================================================
+// JNI 日志回调：将 Zig 层日志输出到 Minecraft 日志（Log4j）
+// ============================================================================
+
+/// 全局 JavaVM 指针，用于在任意线程获取 JNIEnv。
+var global_java_vm: ?*jni.JavaVM = null;
+/// 全局 ZMusicPlayer 类引用。
+var global_zmusic_class: ?*anyopaque = null;
+/// 全局 logFromNative 方法 ID。
+var global_log_method_id: ?*anyopaque = null;
+
+/// 日志级别对应的 Java 字符串。
+const LEVEL_INFO: [:0]const u8 = "INFO";
+const LEVEL_WARN: [:0]const u8 = "WARN";
+const LEVEL_ERROR: [:0]const u8 = "ERROR";
+const LEVEL_DEBUG: [:0]const u8 = "DEBUG";
+
+/// JNI 日志回调函数。
+/// 通过 AttachCurrentThread 获取当前线程的 JNIEnv，
+/// 然后调用 ZMusicPlayer.logFromNative(String level, String msg) 输出日志。
+fn jniLogCallback(level: log.LogLevel, msg: [*:0]const u8) void {
+    const vm = global_java_vm orelse return;
+    const cls = global_zmusic_class orelse return;
+    const method = global_log_method_id orelse return;
+
+    // 获取当前线程的 JNIEnv
+    const env = jni.attachCurrentThread(vm) orelse return;
+
+    const level_str: [:0]const u8 = switch (level) {
+        .debug => LEVEL_DEBUG,
+        .info => LEVEL_INFO,
+        .warn => LEVEL_WARN,
+        .@"error" => LEVEL_ERROR,
+    };
+
+    const level_jstr = jni.newStringUTF(env, level_str.ptr) orelse return;
+    const msg_jstr = jni.newStringUTF(env, msg) orelse return;
+
+    const args = [_]jni.JValue{
+        .{ .l = @ptrCast(level_jstr) },
+        .{ .l = @ptrCast(msg_jstr) },
+    };
+    jni.callStaticVoidMethodA(env, cls, method, &args);
+}
+
+/// 初始化 JNI 日志回调。
+/// 在 nativeInit 中调用，获取 JavaVM、类引用和方法 ID。
+fn initJniLogging(env: *jni.JNIEnv) void {
+    // 获取 JavaVM
+    global_java_vm = jni.getJavaVM(env);
+    if (global_java_vm == null) {
+        log.err("initJniLogging: getJavaVM failed", .{});
+        return;
+    }
+
+    // 查找 ZMusicPlayer 类
+    global_zmusic_class = jni.findClass(env, "me/zhenxin/zmusic/ZMusicPlayer");
+    if (global_zmusic_class == null) {
+        log.err("initJniLogging: findClass failed", .{});
+        return;
+    }
+
+    // 获取 logFromNative 方法 ID
+    global_log_method_id = jni.getStaticMethodID(
+        env,
+        global_zmusic_class.?,
+        "logFromNative",
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+    );
+    if (global_log_method_id == null) {
+        log.err("initJniLogging: getStaticMethodID failed", .{});
+        return;
+    }
+
+    // 设置回调
+    log.setJniLogCallback(jniLogCallback);
+    log.info("initJniLogging: JNI log callback installed", .{});
+}
 
 /// JNI 播放器实例句柄。
 ///
@@ -170,16 +250,22 @@ pub export fn Java_me_zhenxin_zmusic_ZMusicPlayer_nativeInit(
     env: *jni.JNIEnv,
     obj: ?*anyopaque,
 ) i64 {
-    _ = env;
     _ = obj;
-    const handle = PlayerHandle.create() catch return 0;
-    // 设置回调上下文为 PlayerHandle 指针，使回调能定位到正确实例
+    log.info("nativeInit called", .{});
+    // 初始化 JNI 日志回调（仅首次调用有效）
+    if (global_java_vm == null) {
+        initJniLogging(env);
+    }
+    const handle = PlayerHandle.create() catch {
+        log.err("PlayerHandle.create failed", .{});
+        return 0;
+    };
     handle.player.setCallbackContext(@ptrCast(@alignCast(handle)));
-    // 注册回调，将播放器内部事件桥接到 JNI 事件轮询机制
     handle.player.onStateChanged(onStateChangedCb);
     handle.player.onTrackEnded(onTrackEndedCb);
     handle.player.onError(onErrorCb);
     handle.player.onProgress(onProgressCb);
+    log.info("nativeInit ok, handle={*}", .{handle});
     return @as(i64, @bitCast(@intFromPtr(handle)));
 }
 
@@ -212,11 +298,22 @@ pub export fn Java_me_zhenxin_zmusic_ZMusicPlayer_nativePlay(
     url: ?*jni.JString,
 ) i32 {
     _ = obj;
-    const h = handleToPtr(handle) orelse return -1;
-    const chars = jni.getStringUTFChars(env, url) orelse return -1;
+    const h = handleToPtr(handle) orelse {
+        log.err("nativePlay: invalid handle {}", .{handle});
+        return -1;
+    };
+    const chars = jni.getStringUTFChars(env, url) orelse {
+        log.err("nativePlay: getStringUTFChars returned null", .{});
+        return -1;
+    };
     defer jni.releaseStringUTFChars(env, url, chars);
     const slice = std.mem.sliceTo(chars, 0);
-    h.player.play(slice) catch return -1;
+    log.info("nativePlay: url='{s}'", .{slice});
+    h.player.play(slice) catch |e| {
+        log.err("nativePlay: play failed: {}", .{e});
+        return -1;
+    };
+    log.info("nativePlay: ok, state={d}", .{@intFromEnum(h.player.getState())});
     return 0;
 }
 

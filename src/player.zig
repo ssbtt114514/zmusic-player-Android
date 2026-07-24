@@ -23,6 +23,7 @@ const net = @import("net/http_client.zig");
 const streaming = @import("net/streaming.zig");
 const ma = @import("miniaudio");
 const platform = @import("platform");
+const log = @import("android_log");
 
 // ---- 公共类型重导出 ----
 // 将子模块的核心类型提升到 Player 命名空间下，
@@ -165,11 +166,15 @@ pub const Player = struct {
     /// 不应浪费音频设备资源。
     fn ensureEngine(self: *Player) !void {
         if (self.engine_initialized) return;
+        log.info("ensureEngine: initializing miniaudio engine", .{});
         const config = ma.ma_engine_config_init();
         const result = ma.ma_engine_init(&config, &self.engine);
-        if (result != ma.MA_SUCCESS) return PlayerError.DeviceInitFailed;
+        if (result != ma.MA_SUCCESS) {
+            log.err("ensureEngine: ma_engine_init failed, result={d}", .{result});
+            return PlayerError.DeviceInitFailed;
+        }
         self.engine_initialized = true;
-        // 引擎初始化后立即同步之前设置的音量值
+        log.info("ensureEngine: engine init ok", .{});
         _ = ma.ma_engine_set_volume(&self.engine, self.volume);
     }
 
@@ -187,13 +192,23 @@ pub const Player = struct {
         self.setState(.loading);
 
         if (std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://")) {
+            log.info("play: network URL detected", .{});
             try self.playFromUrl(url);
         } else {
+            log.info("play: local file detected", .{});
             try self.playFromFile(url);
         }
 
-        const snd = self.sound orelse return PlayerError.DecodeFailed;
-        _ = ma.ma_sound_start(snd);
+        const snd = self.sound orelse {
+            log.err("play: sound is null after init", .{});
+            return PlayerError.DecodeFailed;
+        };
+        const start_result = ma.ma_sound_start(snd);
+        if (start_result != ma.MA_SUCCESS) {
+            log.err("play: ma_sound_start failed, result={d}", .{start_result});
+            return PlayerError.DecodeFailed;
+        }
+        log.info("play: playback started", .{});
         self.setState(.playing);
     }
 
@@ -248,16 +263,21 @@ pub const Player = struct {
         try self.ensureEngine();
 
         // 步骤 1：获取内容长度
+        log.info("playFromUrl: sending HEAD request", .{});
         const content_length = net.HttpClient.headContentLength(url) catch {
+            log.err("playFromUrl: HEAD request failed", .{});
             self.setState(.@"error");
             return PlayerError.HttpError;
         } orelse {
+            log.err("playFromUrl: no Content-Length header", .{});
             self.setState(.@"error");
             return PlayerError.HttpError;
         };
+        log.info("playFromUrl: content_length={d}", .{content_length});
 
         // 步骤 2：创建流式数据源，启动后台下载
         const src = streaming.StreamingSource.start(self.allocator, url, content_length) catch {
+            log.err("playFromUrl: StreamingSource.start failed", .{});
             self.setState(.@"error");
             return PlayerError.HttpError;
         };
@@ -270,7 +290,9 @@ pub const Player = struct {
         }
 
         // 步骤 3：等待初始缓冲区填入足够数据
+        log.info("playFromUrl: waiting initial buffer", .{});
         src.waitInitialBuffer();
+        log.info("playFromUrl: initial buffer ready, write_pos={d}", .{src.write_pos.load(.acquire)});
 
         // 步骤 4：初始化解码器（带重试）
         const dec = try self.allocator.create(ma.ma_decoder);
@@ -286,23 +308,27 @@ pub const Player = struct {
                 null,
                 dec,
             );
-            if (decode_result == ma.MA_SUCCESS) break;
+            if (decode_result == ma.MA_SUCCESS) {
+                log.info("playFromUrl: decoder init ok after {d} retries", .{retries});
+                break;
+            }
 
-            // 如果下载已完成但解码仍然失败，说明数据不足或格式不支持，不再重试
-            if (src.download_done.load(.acquire)) break;
+            if (src.download_done.load(.acquire)) {
+                log.err("playFromUrl: download done but decode failed, result={d}", .{decode_result});
+                break;
+            }
 
-            // 等待 50ms 让网络继续下载
             const current_pos = src.write_pos.load(.acquire);
             platform.sleepMs(50);
 
-            // 只有当缓冲数据没有增长时才算一次失败重试，
-            // 数据在持续增长说明网络正常，只是解码器需要更多头部数据
             if (src.write_pos.load(.acquire) == current_pos) {
                 retries += 1;
+                log.warn("playFromUrl: decode retry {d}/{d}, result={d}", .{ retries, max_retries, decode_result });
             }
         }
 
         if (decode_result != ma.MA_SUCCESS) {
+            log.err("playFromUrl: decoder init failed after retries, result={d}", .{decode_result});
             self.allocator.destroy(dec);
             self.setState(.@"error");
             return PlayerError.DecodeFailed;
@@ -320,6 +346,7 @@ pub const Player = struct {
             snd,
         );
         if (sound_result != ma.MA_SUCCESS) {
+            log.err("playFromUrl: ma_sound_init_from_data_source failed, result={d}", .{sound_result});
             _ = ma.ma_decoder_uninit(dec);
             self.allocator.destroy(dec);
             self.allocator.destroy(snd);
@@ -329,6 +356,7 @@ pub const Player = struct {
         }
         _ = ma.ma_sound_set_volume(snd, self.volume);
         self.sound = snd;
+        log.info("playFromUrl: sound init ok", .{});
     }
 
     /// ## pause — 暂停当前播放

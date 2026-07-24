@@ -120,3 +120,115 @@ pub fn toString(env: *JNIEnv, str: ?*JString) ?[]const u8 {
     const chars = getStringUTFChars(env, str) orelse return null;
     return std.mem.sliceTo(chars, 0);
 }
+
+/// JavaVM 类型，对应 JNI 的 `JavaVM*`。
+pub const JavaVM = opaque {};
+
+/// JavaVM 接口版本常量。
+pub const JNI_VERSION_1_6: c_int = 0x00010006;
+
+/// 从 JNIEnv 获取关联的 JavaVM 实例。
+///
+/// 对应 JNI 的 `GetJavaVM` 函数（JNIEnv vtable 索引 219）。
+///
+/// 参数：
+///   `env` - JNI 环境指针
+///
+/// 返回：JavaVM 指针，失败时返回 null
+pub fn getJavaVM(env: *JNIEnv) ?*JavaVM {
+    const Fn = *const fn (*JNIEnv, *?*JavaVM) callconv(.c) c_int;
+    const f: Fn = @ptrFromInt(getVtableFnAddr(env, 219));
+    var vm: ?*JavaVM = null;
+    const result = f(env, &vm);
+    if (result != 0) return null;
+    return vm;
+}
+
+/// 将当前线程附加到 JavaVM，获取该线程的 JNIEnv。
+///
+/// 对应 JNI 的 `AttachCurrentThread` 函数（JavaVM vtable 索引 4）。
+/// 如果线程已附加，直接返回现有的 JNIEnv。
+///
+/// 参数：
+///   `vm` - JavaVM 指针
+///
+/// 返回：当前线程的 JNIEnv 指针，失败时返回 null
+pub fn attachCurrentThread(vm: *JavaVM) ?*JNIEnv {
+    const Vtable = struct {
+        reserved0: ?*anyopaque,
+        reserved1: ?*anyopaque,
+        reserved2: ?*anyopaque,
+        reserved3: ?*anyopaque,
+        destroy_java_vm: *const anyopaque,
+        attach_current_thread: *const fn (*JavaVM, *?*JNIEnv, ?*anyopaque) callconv(.c) c_int,
+        detach_current_thread: *const anyopaque,
+        get_env: *const anyopaque,
+        attach_current_thread_as_daemon: *const anyopaque,
+    };
+    const ptr: *const *const Vtable = @ptrCast(@alignCast(vm));
+    const vtable: *const Vtable = ptr.*;
+    var env: ?*JNIEnv = null;
+    const result = vtable.attach_current_thread(vm, &env, null);
+    if (result != 0) return null;
+    return env;
+}
+
+/// 从当前 JNIEnv 查找类。
+///
+/// 对应 JNI 的 `FindClass` 函数（JNIEnv vtable 索引 6）。
+///
+/// 参数：
+///   `env`   - JNI 环境指针
+///   `name`  - 类的完全限定名（如 "me/zhenxin/zmusic/ZMusicPlayer"）
+///
+/// 返回：类对象指针，失败时返回 null
+pub fn findClass(env: *JNIEnv, name: [*:0]const u8) ?*anyopaque {
+    const Fn = *const fn (*JNIEnv, [*:0]const u8) callconv(.c) ?*anyopaque;
+    const f: Fn = @ptrFromInt(getVtableFnAddr(env, 6));
+    return f(env, name);
+}
+
+/// 获取静态方法 ID。
+///
+/// 对应 JNI 的 `GetStaticMethodID` 函数（JNIEnv vtable 索引 113）。
+///
+/// 参数：
+///   `env`       - JNI 环境指针
+///   `cls`       - 类对象指针
+///   `name`      - 方法名
+///   `signature` - JNI 方法签名（如 "(Ljava/lang/String;Ljava/lang/String;)V"）
+///
+/// 返回：方法 ID，失败时返回 null
+pub fn getStaticMethodID(env: *JNIEnv, cls: *anyopaque, name: [*:0]const u8, signature: [*:0]const u8) ?*anyopaque {
+    const Fn = *const fn (*JNIEnv, *anyopaque, [*:0]const u8, [*:0]const u8) callconv(.c) ?*anyopaque;
+    const f: Fn = @ptrFromInt(getVtableFnAddr(env, 113));
+    return f(env, cls, name, signature);
+}
+
+/// 调用静态 void 方法（使用 jvalue 数组传参）。
+///
+/// 对应 JNI 的 `CallStaticVoidMethodA` 函数（JNIEnv vtable 索引 141）。
+///
+/// 参数：
+///   `env`      - JNI 环境指针
+///   `cls`      - 类对象指针
+///   `method`   - 方法 ID
+///   `args`     - 参数数组
+pub fn callStaticVoidMethodA(env: *JNIEnv, cls: *anyopaque, method: *anyopaque, args: [*]const JValue) void {
+    const Fn = *const fn (*JNIEnv, *anyopaque, *anyopaque, [*]const JValue) callconv(.c) void;
+    const f: Fn = @ptrFromInt(getVtableFnAddr(env, 141));
+    f(env, cls, method, args);
+}
+
+/// JNI 的 jvalue 联合体，用于传递方法参数。
+pub const JValue = extern union {
+    z: u8, // boolean
+    b: i8, // byte
+    c: u16, // char
+    s: i16, // short
+    i: c_int, // int
+    j: i64, // long
+    f: f32, // float
+    d: f64, // double
+    l: ?*anyopaque, // object reference
+};

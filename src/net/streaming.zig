@@ -17,6 +17,7 @@ const std = @import("std");
 const ma = @import("miniaudio");
 const HttpClient = @import("http_client.zig").HttpClient;
 const platform = @import("platform");
+const log = @import("android_log");
 
 /// 流式音频源，管理"边下边播"所需的全部状态。
 ///
@@ -136,22 +137,19 @@ pub const StreamingSource = struct {
     ///
     /// 设计为独立线程运行，不阻塞主线程和音频线程。
     fn downloadWorker(self: *StreamingSource, url: [:0]const u8) void {
-        // url 是 start 中 dupeZ 分配的拷贝，函数结束时释放
         defer self.allocator.free(url);
 
+        log.info("downloadWorker: starting download", .{});
         var http = HttpClient.create(self.allocator) catch {
+            log.err("downloadWorker: HttpClient.create failed", .{});
             self.download_err = error.HttpError;
-            // 即使创建失败也要设置 download_done，否则解码线程会永远等待
             self.download_done.store(true, .release);
             return;
         };
         defer http.destroy();
 
-        // 构建自定义 Writer，桥接 HTTP 响应到共享缓冲区
         var sw = StreamingWriter{
             .source = self,
-            // staging 是 Writer 的内部缓冲区，数据先写入这里再 commit 到共享缓冲区
-            // 16KB 的暂存区在内存拷贝开销和提交频率之间取得平衡
             .staging = undefined,
             .writer = undefined,
             .committed = 0,
@@ -162,26 +160,24 @@ pub const StreamingSource = struct {
                 .flush = StreamingWriter.flushFn,
                 .rebase = StreamingWriter.rebaseFn,
             },
-            // staging 数组作为 Writer 的初始缓冲区，Writer 会将数据先写入此缓冲区
             .buffer = sw.staging[0..],
         };
 
-        // fetch 会将整个 HTTP 响应体写入 sw.writer
-        _ = http.client.fetch(.{
+        const fetch_result = http.client.fetch(.{
             .location = .{ .url = url },
             .response_writer = &sw.writer,
         }) catch {
+            log.err("downloadWorker: fetch failed, committed={d}/{d}", .{ sw.committed, self.total_size });
             self.download_err = error.HttpError;
             self.download_done.store(true, .release);
             return;
         };
 
-        // 处理 Writer 缓冲区中可能残留的最后一批数据
         if (sw.writer.end > 0) {
             sw.commit();
         }
-        // 通知解码线程：数据已全部写入（或下载已结束）
         self.download_done.store(true, .release);
+        log.info("downloadWorker: download complete, status={d}, committed={d}/{d}", .{ @intFromEnum(fetch_result.status), sw.committed, self.total_size });
     }
 
     /// 自定义 Writer 实现，将 HTTP 响应数据桥接到 StreamingSource 的共享缓冲区。
