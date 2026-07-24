@@ -191,11 +191,10 @@ fn createMiniaudioModule(
         .optimize = optimize,
     });
 
-    // 为 Android 平台添加必要的头文件路径
+    // 为 Android 平台特殊处理
     if (target.result.os.tag == .linux and target.result.abi == .android) {
         // 从 sysroot 添加标准 C 库头文件路径
         if (b.sysroot) |sysroot| {
-            // 添加 usr/include 路径（包含 pthread.h 等）
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
 
             // 添加架构特定的头文件路径
@@ -204,10 +203,15 @@ fn createMiniaudioModule(
                 .arm => "arm-linux-androideabi",
                 .x86_64 => "x86_64-linux-android",
                 .x86 => "i686-linux-android",
-                else => "aarch64-linux-android", // 默认使用 aarch64
+                else => "aarch64-linux-android",
             };
             translate.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include", arch_name }) });
         }
+
+        // 定义宏来禁用 nullability 属性（解决 NDK 头文件与 Zig 的兼容性问题）
+        translate.addDefine("_Nonnull", "");
+        translate.addDefine("_Nullable", "");
+        translate.addDefine("_Null_unspecified", "");
     }
 
     return translate.createModule();
