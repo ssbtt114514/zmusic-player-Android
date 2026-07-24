@@ -6,18 +6,13 @@
 const std = @import("std");
 
 /// 项目构建入口。
-///
-/// 整体流程：
-/// 1. 解析目标平台和优化选项
-/// 2. 创建 miniaudio 模块（C 头文件翻译）
-/// 3. 构建共享库（JNI 桥接）
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const miniaudio_mod = createMiniaudioModule(b, target, optimize);
 
-    // 平台工具模块（跨平台休眠、时间戳等）
+    // 平台工具模块
     const platform_mod = b.createModule(.{
         .root_source_file = b.path("src/platform.zig"),
     });
@@ -40,7 +35,7 @@ pub fn build(b: *std.Build) void {
     });
     configureModule(b, shared_lib.root_module, target, miniaudio_mod, platform_mod);
 
-    // callback 模块作为独立 import
+    // callback 模块
     shared_lib.root_module.addImport("callback", b.createModule(.{
         .root_source_file = b.path("src/jni/callback.zig"),
     }));
@@ -75,27 +70,15 @@ fn createMiniaudioModule(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
-    // 对于 Android 平台，我们创建一个 wrapper.c 文件
-    // 而不是 wrapper.h，因为 translate-c 对 .c 文件的缓存处理更可靠
+    // Android 平台：使用 wrapper 头文件
     if (isAndroid(target)) {
-        // 创建 wrapper.c 文件
-        const wrapper_content =
-            \\#define _Nonnull
-            \\#define _Nullable
-            \\#define _Null_unspecified
-            \\#include "vendor/miniaudio/miniaudio.h"
-        ;
-        const write_file = b.addWriteFiles();
-        _ = write_file.add("miniaudio_wrapper.c", wrapper_content);
-        
         const translate = b.addTranslateC(.{
-            .root_source_file = b.path("miniaudio_wrapper.c"),
+            .root_source_file = b.path("miniaudio_wrapper.h"),
             .target = target,
             .optimize = optimize,
         });
 
         // 添加必要的 include 路径
-        translate.addIncludePath(b.path(".")); // 让 wrapper 能找到 vendor/
         translate.addIncludePath(b.path("vendor/miniaudio"));
 
         // 添加 NDK sysroot 路径
