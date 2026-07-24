@@ -23,10 +23,6 @@ jobs:
           ndk-version: r27c
           add-to-path: false
 
-      - name: Clean cache
-        run: |
-          rm -rf .zig-cache .zig-cache-tmp || true
-
       - name: Build Android JNI Library
         run: |
           zig build android \
