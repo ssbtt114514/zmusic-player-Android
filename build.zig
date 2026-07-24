@@ -82,29 +82,48 @@ fn createMiniaudioModule(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
-    // 为 Android 平台创建预定义头文件
-    const predef_include = if (target.result.os.tag == .linux and target.result.abi == .android) blk: {
+    // 为 Android 平台创建包装头文件
+    const wrapper_include = if (target.result.os.tag == .linux and target.result.abi == .android) blk: {
+        // 创建包装头文件内容
+        // 先定义宏，然后包含原始的 miniaudio.h
         const content =
+            \\#ifndef MINIAUDIO_WRAPPER_H
+            \\#define MINIAUDIO_WRAPPER_H
+            \\
+            \\// Android NDK compatibility for Zig translate-c
             \\#define _Nonnull
             \\#define _Nullable
             \\#define _Null_unspecified
+            \\
+            \\#include "miniaudio.h"
+            \\
+            \\#endif
         ;
-        const file = b.addWriteFile("android_predef.h", content);
+        const file = b.addWriteFile("miniaudio_wrapper.h", content);
         break :blk file.getDirectory();
     } else null;
 
+    // 对于 Android，翻译包装头文件；否则翻译原始头文件
+    const header_to_translate = if (target.result.os.tag == .linux and target.result.abi == .android)
+        b.path("miniaudio_wrapper.h")  // 使用包装头文件
+    else
+        b.path("vendor/miniaudio/miniaudio.h");  // 使用原始头文件
+
     const translate = b.addTranslateC(.{
-        .root_source_file = b.path("vendor/miniaudio/miniaudio.h"),
+        .root_source_file = header_to_translate,
         .target = target,
         .optimize = optimize,
     });
 
     // 为 Android 平台特殊处理
     if (target.result.os.tag == .linux and target.result.abi == .android) {
-        // 添加预定义头文件目录
-        if (predef_include) |dir| {
+        // 添加包装头文件目录
+        if (wrapper_include) |dir| {
             translate.addIncludePath(dir);
         }
+
+        // 添加 miniaudio 原始目录（让包装头文件能找到 miniaudio.h）
+        translate.addIncludePath(b.path("vendor/miniaudio"));
 
         // 从 sysroot 添加标准 C 库头文件路径
         if (b.sysroot) |sysroot| {
@@ -151,16 +170,10 @@ fn addMiniaudioCSources(
     mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
 ) void {
-    // 为 Android 平台添加宏定义
-    const flags = if (isAndroid(target)) &[_][]const u8{
-        "-D_Nonnull=",
-        "-D_Nullable=",
-        "-D_Null_unspecified=",
-    } else &.{};
-
+    _ = target;
     mod.addCSourceFile(.{
         .file = b.path("vendor/miniaudio/miniaudio.c"),
-        .flags = flags,
+        .flags = &.{},
     });
     mod.addIncludePath(b.path("vendor/miniaudio"));
 }
